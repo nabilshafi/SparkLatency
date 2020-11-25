@@ -1,0 +1,10 @@
+package com.javahelps.spark
+
+
+object MovieRatingSpark {
+
+  def main(args: Array[String]): Unit = {
+    println("Hello  World")
+  }
+
+}
