@@ -9,7 +9,6 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Row.empty.schema
 import org.apache.spark.sql.catalyst.dsl.expressions.StringToAttributeConversionHelper
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.functions.{avg, col, current_timestamp, explode, from_json, max, split, to_csv, window}
 import org.apache.spark.sql.streaming.Trigger
 import org.apache.spark.sql.types.{ArrayType, IntegerType, StringType, StructType}
 import org.apache.spark.{SparkConf, SparkContext}
@@ -44,20 +43,51 @@ object HelloWorld {
     val ssc = new StreamingContext(sparkConf, Seconds(10))
     val data = ssc.textFileStream("/home/nabil/eclipse-workspace/learnscalaspark/ratings100k.csv")*/
     // Create an input stream with the custom receiver on target ip:port and count the
-    /*val sc = new SparkContext("local[*]", "LearnScalaSpark")
+/*    val sc = new SparkContext("local[*]", "LearnScalaSpark")
     val data = sc.textFile("/home/nabil/eclipse-workspace/learnscalaspark/ratings100k.csv")*/
 
 
     val sparkConf = new SparkConf().setAppName("HelloWorld").setMaster("local[*]")
     val ssc = new StreamingContext(sparkConf, Seconds(1))
     ssc.sparkContext.setCheckpointDir("/tmp/")
+    //172.16.0.254
+    val startTime = System.currentTimeMillis()
+    val data: DStream[String] = ssc.receiverStream(new CustomReceiver("172.16.0.254", 5000))
 
-    val data = ssc.receiverStream(new CustomReceiver("localhost", 31000))
 
-    val result = data.map(line => line.split(',')(1).toInt) // Ext
-      .countByValueAndWindow(Seconds(2), Seconds(1))
+    val result = data.map(mapToValues).reduceByKeyAndWindow((a, b) =>
+      (a._1, a._2, a._3, a._4, a._5, a._6 + b._6),
+      windowDuration = Seconds(2), Seconds(1))
 
-    val value = result.reduceByWindow((x, y) => if(x._2 > y._2) x else y,Seconds(2), Seconds(1))
+    val result1 = result.reduce((x, y) => if(x._2._6 > y._2._6) x else y)
+
+
+    val hotBid = result1.map(a=>new Tuple8[Int,Long, Int,Int,Float,Long,Int,Long]
+      (a._1, a._2._1, a._2._2, a._2._3, a._2._4, a._2._5, a._2._6, System.currentTimeMillis())
+    )
+
+    hotBid.saveAsTextFiles("/home/nabil/eclipse-workspace/learnscalaspark/data/filess.csv")
+
+
+
+    /*  val result = data.map(line => line.split(',')(0).toInt) // Ext
+        .countByValueAndWindow(Seconds(2), Seconds(1))
+
+      val hotItem = result.reduce((x, y) => {
+
+          if(x._2 > y._2) {
+            println("xxxxxx")
+            println(x)
+            x
+          }
+          else {
+            print("yyyy")
+            println(y)
+            (y,System.currentTimeMillis())
+          }
+      })
+  */
+
 
     //val value = result.reduceByKey(math.max(_,_))
     //val value = result.reduceByKeyAndWindow(math.max(_,_),Seconds(2), Seconds(1))
@@ -68,8 +98,23 @@ object HelloWorld {
 
     //val k = result.maxBy(_._2)
 
-    value.print()
+
     //println(k)
+
+    //Highbid
+
+/*    val result1 = data.map(mapToValues).reduceByKeyAndWindow((x, y) =>  {
+      if(x._4 > y._4) x else y
+    },windowDuration = Seconds(2)).repartition(1)
+
+    val k = result1.reduce((x, y) => if(x._2._4 > y._2._4) x else y)
+
+    val highBid = k.map(a=>new Tuple8[Int,Long, Int,Int,Float,Long,Int,Long]
+    (a._1, a._2._1, a._2._2, a._2._3, a._2._4, a._2._5, a._2._6, System.currentTimeMillis())
+    )
+
+    highBid.saveAsTextFiles("/home/nabil/eclipse-workspace/learnscalaspark/data/filess.csv")*/
+
 
    /* val resulty = data.map(mapToTuple).reduce((x, y) => if(x._2 > y._2) x else y)
 
@@ -77,10 +122,8 @@ object HelloWorld {
     println(resulty)*/
 
 
-    value.saveAsTextFiles("/home/nabil/eclipse-workspace/learnscalaspark/data/filess.csv")
+   // result.saveAsTextFiles("/home/nabil/eclipse-workspace/learnscalaspark/data/filess.csv")
     //k.foreachRDD(t=> t.saveAsTextFile("/home/nabil/eclipse-workspace/learnscalaspark/data/filess.csv"))
-
-
     //val ll = sc.parallelize(Seq(count))
 
 
@@ -94,13 +137,14 @@ object HelloWorld {
     // val wordCounts = lines.reduceByKeyAndWindow((a:Int,b:Int) => (a + b), Milliseconds(2000), Milliseconds(1000))
     //val result = lines.map(line => line.split(',')(4).toFloat *1.24) // Extract rating from line as float
 
-/*    var data = lines.map(line => line.concat("," + line.split(',')(4).toFloat * 1.24 + "," + System.currentTimeMillis() ))
+    /*var conv = data.map(line => line.concat("," +System.currentTimeMillis() ))
+     conv = conv.map(line => line.concat("," + line.split(',')(4).toFloat * 1.24 ))
 
-    data = data.map(line => line.concat("," + System.currentTimeMillis()))*/
+    conv = conv.map(line => line.concat("," + System.currentTimeMillis()))
 
    // val data = data.map(line => line.split(',')(1).toInt).countByValue(1) // Extract rating from line as float
 
-    //data.saveAsTextFiles("/home/nabil/eclipse-workspace/learnscalaspark/data/filess.csv")
+    conv.saveAsTextFiles("/home/nabil/eclipse-workspace/learnscalaspark/data/filess.csv")*/
 
 
 
@@ -112,89 +156,14 @@ object HelloWorld {
   //  data.saveAsTextFiles("/home/nabil/eclipse-workspace/learnscalaspark/data/filess.csv")
 
   ssc.start()
-    ssc.awaitTermination()
 
+    ssc.awaitTermination()
+    println("Throughput: " + (System.currentTimeMillis() - startTime))
 
   }
 
 
 
- /*   val startTime = System.nanoTime
-
-    val sc = new SparkContext("local[*]", "LearnScalaSpark")
-    // Read a text file
-    var data = sc.textFile("/home/nabil/eclipse-workspace/learnscalaspark/ratings1m.csv")
-    // Extract the first row which is the header
-    //val header = data.first()
-
-
-  data = data.map(line => line.concat("," + System.nanoTime()))
-
-
-    data = data.map(line => line.concat("," + System.nanoTime()))
-
-    //result.foreach(println)
-
-
-    data.coalesce(1).saveAsTextFile("/home/nabil/eclipse-workspace/learnscalaspark/ratings1m")
-    println("Throughput: " + (System.nanoTime - startTime))}
-*/
-
-
-
-
-
-
-
-/*    val spark = SparkSession
-      .builder()
-      .appName("Spark SQL basic example")
-      .config("spark.master", "local")
-      .getOrCreate()*/
-
-/*    val startTime = System.nanoTime
-
-
-
-    val sparkConf = new SparkConf().setAppName("simpleReading").
-      setMaster("local[2]")
-    //set spark configuration
-    val sparkContext = new SparkContext(sparkConf)
-    // make spark context
-    val sqlContext = new SQLContext(sparkContext) // make sql context
-
-    val df = sqlContext.read.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      option("inferSchema", "true").load("/home/nabil/eclipse-workspace/learnscalaspark/ratings.csv")
-
-    //load data from a file
-
-    val selectedCity = df.select("movieId")
-
-selectedCity.show()
-    val selectMake = df.select("userId", "rating") //select particular column
-    selectMake.show()
-    //show make column
-
-    val tempTable = df.registerTempTable("my_table")
-    //makes a temporary table
-    val usingSQL = sqlContext
-      .sql("select rating from my_table")
-    //show all the csv file's data in temp table
-    usingSQL.show()
-    val stopTime = System.nanoTime
-    val duration = (stopTime - startTime) / 1e9d
-    System.out.println(duration)
-    System.out.println(100000/duration)
-*/
-
-    /* var data = spark.read.csv("/home/nabil/eclipse-workspace/learnscalaspark/ratings.csv")
-   // val df = spark.read.json("/home/nabil/eclipse-workspace/learnscalaspark/people.json")
-   val header = data.select("movieId")
-
-    print(header)
-*/
 
 
 
@@ -204,6 +173,22 @@ selectedCity.show()
 
     return sum
   }
+
+  def addTime( a:Int, b:Long ) :(Int, (Long,Long)) = {
+
+
+    return (a, (b,System.currentTimeMillis()))
+  }
+
+
+
+  def mapToValues(line: String): (Int, (Long, Int,Int,Float,Long,Int)) = {
+
+    val fields = line.split(',')
+
+    return (fields(0).toInt, (fields(1).toLong,fields(2).toInt,fields(3).toInt,fields(4).toFloat,System.currentTimeMillis(), 1))
+  }
+
 
   def mapToTuple(line: String): (Int, (Int)) = {
     val fields = line.split(',')
